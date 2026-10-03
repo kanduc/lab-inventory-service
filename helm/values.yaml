@@ -43,7 +43,7 @@ readinessProbe:
   enabled: true
   httpGet:
     path: /actuator/health
-    port: 8080
+    port: 8081
   initialDelaySeconds: 10
   periodSeconds: 5
   timeoutSeconds: 2
@@ -54,7 +54,7 @@ livenessProbe:
   enabled: true
   httpGet:
     path: /actuator/health
-    port: 8080
+    port: 8081
   initialDelaySeconds: 30
   periodSeconds: 10
   timeoutSeconds: 2
