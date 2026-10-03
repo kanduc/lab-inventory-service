@@ -123,7 +123,7 @@ jobs:
           - component: inventory-service
             release: inventory-service
             chart: ./helm
-            ecr_repository: ${{ vars.INVENTORY_ECR_REPOSITORY }}
+            ecr_repository: inventory-service
             deployment: inventory-service
 
     steps:
