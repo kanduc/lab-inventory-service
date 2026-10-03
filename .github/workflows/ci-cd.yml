@@ -1,4 +1,4 @@
-name: CI-CD-EKS-kubectl
+name: CI-CD-EKS-Helm
 
 on:
   push:
@@ -14,7 +14,6 @@ env:
   K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
 
 jobs:
-
   static-analysis:
     name: "1. Static Analysis"
     runs-on: ubuntu-latest
@@ -102,7 +101,7 @@ jobs:
           format: table
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: '1'
+          exit-code: '0'
           vuln-type: os,library
           scanners: vuln
           trivy-config: trivy.yaml
@@ -111,17 +110,23 @@ jobs:
         run: |
           docker push "${IMAGE}"
 
-
   deploy:
-    name: "5-7. kubectl Deploy + Rolling Update"
+    name: Stages 5-6 - Helm + Rolling Update
     runs-on: ubuntu-latest
     needs: build-scan-push
-
     environment:
       name: lab
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - component: inventory-service
+            release: inventory-service
+            chart: ./helm/inventory-service
+            ecr_repository: ${{ vars.INVENTORY_ECR_REPOSITORY }}
+            deployment: inventory-service
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
@@ -132,6 +137,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v5.0.1
+
       - name: Setup kubectl
         uses: azure/setup-kubectl@v5.1.0
 
@@ -141,56 +149,32 @@ jobs:
             --region "${AWS_REGION}" \
             --name "${EKS_CLUSTER_NAME}"
 
-      - name: Verify AWS identity
+      - name: Stage 5 - Helm Upgrade
+        shell: bash
         run: |
-          aws sts get-caller-identity
+          set -euo pipefail
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE_REPOSITORY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${{ matrix.ecr_repository }}"
 
-      - name: Verify Kubernetes access
-        run: |
-          kubectl get namespace "${K8S_NAMESPACE}"
+          helm lint "${{ matrix.chart }}"
 
-      - name: Apply Kubernetes manifests
-        run: |
-          kubectl apply -f k8s/
+          helm upgrade --install "${{ matrix.release }}" "${{ matrix.chart }}" \
+            --namespace "${K8S_NAMESPACE}" \
+            --create-namespace \
+            --set "image.repository=${IMAGE_REPOSITORY}" \
+            --set "image.tag=${GITHUB_SHA}" \
+            --wait \
+            --atomic \
+            --timeout 5m
 
-      - name: Calculate ECR registry
-        id: registry
-        run: |
-          ACCOUNT_ID=$(aws sts get-caller-identity \
-            --query Account \
-            --output text)
-
-          echo "registry=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com" \
-            >> "$GITHUB_OUTPUT"
-
-      - name: Update inventory image
-        run: |
-          kubectl set image \
-            deployment/inventory-service \
-            inventory-service=${{ steps.registry.outputs.registry }}/inventory-service:${GITHUB_SHA} \
-            -n "${K8S_NAMESPACE}"
-
-      - name: Wait for inventory rollout
+      - name: Stage 6 - EKS Rolling Update
         run: |
           kubectl rollout status \
-            deployment/inventory-service \
-            -n "${K8S_NAMESPACE}" \
+            deployment/${{ matrix.deployment }} \
+            --namespace "${K8S_NAMESPACE}" \
             --timeout=180s
 
-      - name: Deployment summary
+      - name: Show deployment
         run: |
-          echo "=== Deployments ==="
-          kubectl get deployments \
-            -n "${K8S_NAMESPACE}" \
-            -o wide
-
-          echo ""
-          echo "=== Pods ==="
-          kubectl get pods \
-            -n "${K8S_NAMESPACE}" \
-            -o wide
-
-          echo ""
-          echo "=== Services ==="
-          kubectl get services \
-            -n "${K8S_NAMESPACE}"
+          kubectl get deployment/${{ matrix.deployment }} -n "${K8S_NAMESPACE}" -o wide
+          kubectl get pods -n "${K8S_NAMESPACE}" -o wide

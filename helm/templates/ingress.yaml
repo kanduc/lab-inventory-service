@@ -1,0 +1,1 @@
+{{- /* Backend charts intentionally do not create an Ingress. */ -}}
