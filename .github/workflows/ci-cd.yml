@@ -122,7 +122,7 @@ jobs:
         include:
           - component: inventory-service
             release: inventory-service
-            chart: ./helm/inventory-service
+            chart: ./helm
             ecr_repository: ${{ vars.INVENTORY_ECR_REPOSITORY }}
             deployment: inventory-service
 
